@@ -52,6 +52,20 @@
             #reader { width: 100%; border-radius: 12px 12px 0 0; overflow: hidden; box-shadow: 0 -5px 20px var(--shadow); border: 3px solid var(--border-color); border-bottom: none; background: black; height: 280px !important; position: relative; }
             video { object-fit: cover; height: 100%; width: 100%; }
             
+            /* --- TOGGLE SWITCH STYLE --- */
+            .switch-container { display: flex; align-items: center; gap: 8px; margin-right: 5px; }
+            .switch { position: relative; display: inline-block; width: 40px; height: 22px; }
+            .switch input { opacity: 0; width: 0; height: 0; }
+            .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--accent-part); transition: .4s; border-radius: 34px; }
+            .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+            
+            /* Kalau Checked (Manual) jadi warna Orange/Pending */
+            input:checked + .slider { background-color: var(--pending); }
+            input:checked + .slider:before { transform: translateX(9px); }
+            
+            /* Label text kecil di samping switch */
+            .switch-label { font-size: 0.75rem; font-weight: bold; color: var(--text-muted); width: 45px; text-align: right; }
+            
             /* --- Tambahkan di bagian CSS --- */
             .btn-manual-scan {
             position: absolute; 
@@ -297,9 +311,24 @@
                 
                 <div id="box-ui" class="active-box-display">
                     <div class="box-header-row">
-                        <h3>BOX AKTIF: <span id="current-box-id">-</span></h3>
-                        <button class="btn-mini" onclick="resetBox()">Ganti</button>
+                        <h3>BOX: <span id="current-box-id">-</span></h3>
+                        
+                        <div style="display:flex; align-items:center;"><button class="btn-mini" onclick="resetBox()">Ganti</button>
+                            
+                            
+                            
+                            <div class="switch-container">
+                                <span id="label-mode-opname" class="switch-label" style="color:var(--accent-part)">AUTO</span>
+                                <label class="switch">
+                                    <input type="checkbox" id="opnameModeToggle" onchange="updateOpnameLabel(this)">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            
+                            
+                        </div>
                     </div>
+                    
                     <div class="filter-row">
                         <select id="filter-cat" class="select-filter" onchange="applyOpnameFilters()">
                             <option value="ALL">Semua Kategori</option>
@@ -310,18 +339,6 @@
                     </div>
                 </div>
                 
-                <div id="opname-settings" class="opname-controls">
-                    <div style="display:flex; justify-content:space-around;">
-                        <label class="radio-label">
-                            <input type="radio" name="opnameType" value="auto" checked> 
-                            <span>⚡ Auto (+1)</span>
-                        </label>
-                        <label class="radio-label">
-                            <input type="radio" name="opnameType" value="manual"> 
-                            <span>⌨️ Manual Input</span>
-                        </label>
-                    </div>
-                </div>
                 
                 <div class="table-container">
                     <table id="work-table">
@@ -378,8 +395,8 @@
             let isScanLocked = false; 
             
             // --- REGEX PATTERN ---
-            const boxRegex = /^[A-Z0-9]+-[0-9]+$/;
-            const partRegex = /^([A-Z0-9]{2}-[0-9]{6})($|-)/;
+            const boxRegex = /^[A-Z0-9]{2,3}-[0-9]{2,3}$/;
+            const partRegex = /^[A-Z0-9]{2,}-[A-Z0-9]{4,}/;     
             
             // --- INIT APPLICATION ---
             function init() {
@@ -452,6 +469,17 @@
                 else {
                     if(userInput !== undefined) Swal.fire('Salah!', 'Jawaban matematika salah. Akses ditolak.', 'error');
                     return false;
+                }
+            }
+            
+            function updateOpnameLabel(checkbox) {
+                const label = document.getElementById('label-mode-opname');
+                if(checkbox.checked) {
+                    label.innerText = "MANUAL";
+                    label.style.color = "var(--pending)";
+                    } else {
+                    label.innerText = "AUTO";
+                    label.style.color = "var(--accent-part)";
                 }
             }
             
@@ -727,9 +755,10 @@
                 if (isScanLocked) return;
                 
                 let cleanText = decodedText.trim().toUpperCase();
+                // Hapus karakter pipa | jika ada (kadang ada di QR part tertentu)
                 if (cleanText.includes('|')) cleanText = cleanText.split('|')[0].trim();
                 
-                // 1. MODE SEARCH
+                // 1. MODE SEARCH (Cari)
                 if (currentMode === 'search') {
                     document.getElementById('audio-beep').play();
                     document.getElementById('searchInput').value = cleanText;
@@ -738,15 +767,19 @@
                     return;
                 }
                 
+                // LOGIKA DETEKSI TIPE (BOX vs PART)
                 const isBox = boxRegex.test(cleanText);
                 const isPart = partRegex.test(cleanText);
                 
-                // 2. MODE STORE
+                // Debugging di console (opsional, untuk cek saja)
+                console.log(`Scan: ${cleanText} | isBox: ${isBox} | isPart: ${isPart}`);
+                
+                // 2. MODE STORE (Simpan)
                 if (currentMode === 'store') {
-                    // FIX: Validasi Format Awal (Penting untuk feedback jika scan gagal baca format)
+                    // Validasi Format: Jika bukan Box dan bukan Part, tolak.
                     if (!isBox && !isPart) {
                         Swal.mixin({toast: true, position: 'center', timer: 2000})
-                        .fire({icon: 'error', title: 'Format QR Salah', text: 'Bukan Part atau Box'});
+                        .fire({icon: 'error', title: 'Format QR Tidak Dikenali', text: cleanText});
                         triggerCooldownAnimation();
                         return;
                     }
@@ -786,7 +819,6 @@
                             Swal.mixin({toast: true, position: 'top-end', timer: 2000, showConfirmButton: false})
                             .fire({icon: 'success', title: `Tersimpan di ${cleanText}`});
                             } else {
-                            // Feedback jika user scan box duluan sebelum barang
                             Swal.fire("Scan Barang Dulu", "Scan barang yang mau disimpan, baru scan box ini.", "info");
                             triggerCooldownAnimation(); 
                         }
@@ -841,399 +873,398 @@
                             handleExtraOpnameItem(cleanText);
                         }
                         } else if (!isBox) {
-                        // Fallback Feedback di Mode Opname
                         Swal.mixin({toast: true, position: 'center', timer: 1500})
                         .fire({icon: 'warning', title: 'Format Salah', text: 'Bukan Box atau Part'});
                         triggerCooldownAnimation();
                     }
                 }
             }
-        
-        
-        function addRecord(box, part, qty) {
-            const idx = scannedData.findIndex(i => i.box === box && i.part === part);
-            if (currentMode === 'store') {
-                if (idx === -1) scannedData.push({box, part, qty: 0});
-                } else {
-                if(!qty || qty <= 0) return;
-                if (idx >= 0) scannedData[idx].qty += qty;
-                else scannedData.push({box, part, qty});
-            }
-            localStorage.setItem('wh_data', JSON.stringify(scannedData));
-            renderWorkTable();
-        }
-        
-        function renderWorkTable() {
-            if (currentMode === 'opname') {
-                renderOpnameTable();
-                return;
-            }
             
-            const tbody = document.getElementById('result-body');
-            const thead = document.getElementById('table-header');
-            tbody.innerHTML = "";
-            thead.innerHTML = `<tr><th width="20%">Box</th><th width="55%">Part & Desc</th><th width="25%" style="text-align:right">Loc</th></tr>`;
             
-            [...scannedData].reverse().forEach((item, index) => {
-                const origIdx = scannedData.length - 1 - index;
-                let sysInfo = systemDataMap[item.part] || { desc: 'Unknown', qty: 0 };
-                
-                const tr = document.createElement('tr');
-                
-                // --- LOGIC LONG PRESS 2 DETIK ---
-                let pressTimer;
-                const longPressDuration = 2000; // 2 detik
-                
-                const startPress = (e) => {
-                    // Prevent default context menu pada mobile
-                    // e.preventDefault(); 
-                    pressTimer = setTimeout(() => {
-                        editRecord(origIdx);
-                    }, longPressDuration);
-                };
-                
-                const cancelPress = () => {
-                    if (pressTimer) clearTimeout(pressTimer);
-                };
-                
-                // Event Listeners untuk Desktop & Mobile
-                tr.addEventListener('mousedown', startPress);
-                tr.addEventListener('touchstart', startPress);
-                tr.addEventListener('mouseup', cancelPress);
-                tr.addEventListener('mouseleave', cancelPress);
-                tr.addEventListener('touchend', cancelPress);
-                tr.addEventListener('touchmove', cancelPress); // Batal jika user scroll
-                // --------------------------------
-                
-                tr.innerHTML = `
-                <td style="color:var(--accent-box); font-weight:bold">${item.box}</td>
-                <td>
-                <div>${item.part}</div>
-                <span class="desc-text">${sysInfo.desc}</span>
-                <div style="font-size:0.65rem; color:var(--text-muted); margin-top:2px;">(Tahan 2 detik utk edit)</div>
-                </td>
-                <td style="text-align:right"><i class="fas fa-check" style="color:var(--accent-part)"></i></td>
-                `;
-                tbody.appendChild(tr);
-            });
-        }
-        
-        function editRecord(idx) {
-            const item = scannedData[idx];
-            const sysItem = systemDataMap[item.part];
-            let htmlContent = `Box: ${item.box}<br>Part: ${item.part}<br><small>${sysItem ? sysItem.desc : ''}</small>`;
-            const deleteDbButton = `<br><br><button onclick="deletePartFromDB('${item.part}')" style="background:#444; color:#ff5252; border:1px solid #ff5252; padding:5px 10px; border-radius:5px; cursor:pointer;">⚠️ Hapus Item dr Database</button>`;
-            
-            Swal.fire({
-                title: 'Edit Data',
-                html: htmlContent + deleteDbButton,
-                input: (currentMode === 'opname') ? 'number' : undefined,
-                inputValue: (currentMode === 'opname') ? item.qty : undefined,
-                showDenyButton: true,
-                denyButtonText: 'Hapus History',
-                confirmButtonText: (currentMode === 'opname') ? 'Update Qty' : 'Tutup',
-                confirmButtonColor: 'var(--accent-part)',
-                denyButtonColor: '#f39c12'
-                }).then(r => {
-                if(r.isConfirmed && currentMode === 'opname') {
-                    scannedData[idx].qty = parseInt(r.value);
-                    localStorage.setItem('wh_data', JSON.stringify(scannedData));
-                    renderWorkTable();
-                    } else if(r.isDenied) {
-                    scannedData.splice(idx, 1);
-                    localStorage.setItem('wh_data', JSON.stringify(scannedData));
-                    renderWorkTable();
+            function addRecord(box, part, qty) {
+                const idx = scannedData.findIndex(i => i.box === box && i.part === part);
+                if (currentMode === 'store') {
+                    if (idx === -1) scannedData.push({box, part, qty: 0});
+                    } else {
+                    if(!qty || qty <= 0) return;
+                    if (idx >= 0) scannedData[idx].qty += qty;
+                    else scannedData.push({box, part, qty});
                 }
-            });
-        }
-        
-        window.deletePartFromDB = async function(part) {
-            Swal.close();
-            const isAuthorized = await verifySecurity('Menghapus Permanen');
-            if(!isAuthorized) return;
-            
-            const initialLen = fullInventory.length;
-            fullInventory = fullInventory.filter(i => i.part !== part);
-            if(fullInventory.length < initialLen) {
-                saveInventory();
-                rebuildSystemMap();
-                scannedData = scannedData.filter(i => i.part !== part);
                 localStorage.setItem('wh_data', JSON.stringify(scannedData));
                 renderWorkTable();
-                updateDBStatus(fullInventory.length);
-                populateFilters();
-                Swal.fire('Terhapus', `Part ${part} telah dihapus.`, 'success');
             }
-        }
-        
-        function manualSearch() {
-            const keyword = document.getElementById('searchInput').value.trim().toUpperCase();
-            const tbody = document.getElementById('search-body');
-            tbody.innerHTML = "";
-            if(!keyword) return;
             
-            let dbResults = fullInventory.filter(i => i.part.includes(keyword) || i.desc.toUpperCase().includes(keyword));
-            if (dbResults.length > 0) {
-                dbResults.forEach(item => {
-                    const locs = item.locations || [];
-                let locHtml = locs.length > 0 ? `<div class="loc-wrapper">${locs.map(l=>`<span class="loc-tag"><i class="fas fa-map-marker-alt"></i> ${l}</span>`).join('')}</div>` : `<span style="color:var(--text-muted); font-size:0.8rem;">Belum Scan</span>`;
-                
-                // Info Kategori di Search
-                const infoHtml = `<div>${item.part}</div><div class="desc-text">${item.desc}</div><div style="font-size:0.7rem; color:var(--accent-search)">${item.category} ${item.teknisi !== '-' ? '| '+item.teknisi : ''}</div>`;
-                
-                const tr = document.createElement('tr');
-                tr.innerHTML = `<td>${locHtml}</td><td>${infoHtml}</td><td style="text-align:right">${item.qty}</td>`;
-                tbody.appendChild(tr);
-                });
-                } else {
-                tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:20px; color:var(--text-muted)">Tidak ditemukan</td></tr>`;
-                }
+            function renderWorkTable() {
+                if (currentMode === 'opname') {
+                    renderOpnameTable();
+                    return;
                 }
                 
-                function cancelPending() { pendingPart = null; updateUIState(); }
-                function resetBox() { currentBox = null; localStorage.removeItem('wh_box'); updateUIState(); }
-                async function clearDataWithSecurity() {
-                const isAuthorized = await verifySecurity('Reset Semua Data');
-                if(isAuthorized) {
-                scannedData=[]; localStorage.removeItem('wh_data'); renderWorkTable(); toggleModal(false); Swal.fire("Terhapus", "Data History scan berhasil direset.", "success");
-                }
-                }
-                
-                function exportDatabase() {
-                if(!fullInventory.length) return Swal.fire("Info","Database kosong","info");
-                const exportData = fullInventory.map(item => ({
-                "PART NUMBER": item.part,
-                "DESKRIPSI": item.desc,
-                "QTY SYSTEM": item.qty,
-                "LOKASI BOX": item.locations ? item.locations.join(", ") : "",
-                "LOKASI": item.category,
-                "TEKNISI": item.teknisi
-                }));
-                const ws = XLSX.utils.json_to_sheet(exportData);
-                const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, "Database_Gudang");
-                XLSX.writeFile(wb, `Database_Lokasi_${new Date().toISOString().slice(0,10)}.xlsx`);
-                toggleModal(false);
-                }
-                
-                function updateUIState() {
-                const s = document.getElementById('scan-status'); 
-                const r = document.getElementById('reader');
-                const pendingUi = document.getElementById('pending-ui');
-                const overlay = document.getElementById('scan-overlay');
-                const boxEl = document.getElementById('current-box-id');
-                if(boxEl) boxEl.innerText = currentBox ? currentBox : "-";
-                
-                if (currentMode === 'store') {
-                if (pendingPart) {
-                s.innerText = "SCAN BOX SEKARANG!";
-                s.style.color = "var(--pending)";
-                r.style.borderColor = "var(--pending)";
-                pendingUi.classList.add('active');
-                overlay.classList.add('active');
-                document.getElementById('pending-part-display').innerText = pendingPart;
-                document.getElementById('overlay-part').innerText = pendingPart;
-                const item = systemDataMap[pendingPart];
-                const locContainer = document.getElementById('existing-locs');
-                if (item && item.locations && item.locations.length > 0) {
-                locContainer.innerHTML = item.locations.map(l => `<span class="loc-tag"><i class="fas fa-map-marker-alt"></i> ${l}</span>`).join('');
-                } else {
-                locContainer.innerHTML = `<span style="color:var(--text-muted); font-size:0.8rem;">Belum ada lokasi</span>`;
-                }
-                } else {
-                s.innerText = "Scan Barang (Part)";
-                s.style.color = "var(--accent-box)";
-                r.style.borderColor = "var(--accent-box)";
-                pendingUi.classList.remove('active');
-                overlay.classList.remove('active');
-                }
-                } else if (currentMode === 'opname') {
-                pendingUi.classList.remove('active');
-                overlay.classList.remove('active');
-                if (currentBox) {
-                s.innerText = "Siap Opname Barang";
-                r.style.borderColor = "var(--accent-part)";
-                } else {
-                s.innerText = "Scan BOX Dulu";
-                r.style.borderColor = "var(--accent-part)";
-                }
-                } else { 
-                s.innerText = "Mode Cari";
-                r.style.borderColor = "var(--accent-search)";
-                pendingUi.classList.remove('active');
-                overlay.classList.remove('active');
-                }
-                const secBadge = document.getElementById('security-alert');
-                if(fullInventory.length === 0 && secBadge) secBadge.style.display = 'block';
-                else if(secBadge) secBadge.style.display = 'none';
-                }
-                
-                // --- LOGIC OPNAME BARU (FILTERING) ---
-                function initOpnameList(box) {
-                opnameList = [];
-                
-                // Ambil Filter Value
-                const catSelect = document.getElementById('filter-cat');
-                const tekSelect = document.getElementById('filter-tek');
-                const filterCat = catSelect.value;
-                const filterTek = tekSelect.value;
-                
-                fullInventory.forEach(item => {
-                // 1. Cek Lokasi Box
-                if (item.locations && item.locations.includes(box)) {
-                
-                // 2. Logic Filter Kategori
-                let match = true;
-                if (filterCat !== 'ALL') {
-                if (item.category !== filterCat) match = false;
-                // 3. Logic Filter Teknisi (Hanya jika kategori teknisi dipilih)
-                if (match && filterCat === 'SPAREPART TEKNISI' && filterTek !== 'ALL') {
-                if (item.teknisi !== filterTek) match = false;
-                }
-                }
-                
-                if (match) {
-                opnameList.push({
-                part: item.part,
-                desc: item.desc,
-                systemQty: item.qty, 
-                physicalQty: 0,
-                isExtra: false,
-                isUnregistered: false
-                });
-                }
-                }
-                });
-                renderOpnameTable();
-                }
-                
-                async function handleExtraOpnameItem(part) {
-                const sysItem = systemDataMap[part];
-                let titleTxt = "Barang Salah Lokasi?";
-                let htmlTxt = "";
-                let confirmBtn = "Ya, Tambahkan";
-                let isUnregistered = false;
-                
-                if (sysItem) {
-                // Info tentang barang yang ada di DB tapi salah box
-                let locInfo = sysItem.locations && sysItem.locations.length > 0 ? `<b>${sysItem.locations.join(', ')}</b>` : "Belum ada lokasi";
-                htmlTxt = `
-                <div style="font-weight:bold; font-size:1.1rem">${part}</div>
-                <div>${sysItem.desc}</div>
-                <div style="margin:10px 0; font-size:0.85rem; color:#888">
-                    Kategori: <b>${sysItem.category}</b><br>
-                    Lokasi Terdaftar: ${locInfo}
-                </div>
-                <p>Tambah ke Box <b>${currentBox}</b>?</p>
-                `;
-                } else {
-                titleTxt = "Barang Tidak Dikenal";
-                htmlTxt = `
-                <div style="font-weight:bold; font-size:1.1rem; color:var(--accent-search)">${part}</div>
-                <div style="margin:10px 0; background:var(--input-bg); padding:10px; border-radius:5px">
-                    <i class="fas fa-exclamation-circle"></i> Tidak ada di Database
-                </div>
-                <p>Masukkan paksa ke box ini?</p>
-                `;
-                confirmBtn = "Ya, Masukkan";
-                isUnregistered = true;
-                }
-                
-                const result = await Swal.fire({
-                title: titleTxt,
-                html: htmlTxt,
-                icon: isUnregistered ? 'question' : 'warning',
-                showCancelButton: true,
-                confirmButtonText: confirmBtn,
-                confirmButtonColor: isUnregistered ? 'var(--accent-search)' : 'var(--pending)'
-                });
-                
-                if (result.isConfirmed) {
-                opnameList.unshift({
-                part: part,
-                desc: sysItem ? sysItem.desc : 'Item Baru',
-                systemQty: 0,
-                physicalQty: 1, // Start 1
-                isExtra: !isUnregistered,
-                isUnregistered: isUnregistered
-                });
-                
-                // Update memory lokasi jika registered
-                if(!isUnregistered && sysItem) {
-                if(!sysItem.locations) sysItem.locations = [];
-                if(!sysItem.locations.includes(currentBox)) sysItem.locations.push(currentBox);
-                }
-                
-                renderOpnameTable();
-                triggerCooldownAnimation();
-                }
-                html5QrCode.resume();
-                }
-                
-                function updateOpnameCount(part, qty) {
-                let itemIndex = opnameList.findIndex(i => i.part === part);
-                if (itemIndex >= 0) {
-                opnameList[itemIndex].physicalQty += qty;
-                renderOpnameTable();
-                }
-                }
-                
-                function renderOpnameTable() {
-                if(currentMode !== 'opname') return;
                 const tbody = document.getElementById('result-body');
                 const thead = document.getElementById('table-header');
-                
-                thead.innerHTML = `<tr><th width="50%">Part Info</th><th width="25%" style="text-align:center">Fisik</th><th width="25%" style="text-align:center">Sys Total</th></tr>`;
                 tbody.innerHTML = "";
+                thead.innerHTML = `<tr><th width="20%">Box</th><th width="55%">Part & Desc</th><th width="25%" style="text-align:right">Loc</th></tr>`;
                 
-                if(opnameList.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:20px; color:var(--text-muted)">Box Kosong / Tidak Sesuai Filter</td></tr>`;
-                return;
-                }
-                
-                const sortedList = [...opnameList].sort((a, b) => {
-                if (a.isUnregistered && !b.isUnregistered) return -1;
-                if (!a.isUnregistered && b.isUnregistered) return 1;
-                if (a.isExtra && !b.isExtra) return -1;
-                if (!a.isExtra && b.isExtra) return 1;
-                const aDiff = a.physicalQty !== a.systemQty;
-                const bDiff = b.physicalQty !== b.systemQty;
-                if (aDiff && !bDiff) return -1;
-                return 0;
+                [...scannedData].reverse().forEach((item, index) => {
+                    const origIdx = scannedData.length - 1 - index;
+                    let sysInfo = systemDataMap[item.part] || { desc: 'Unknown', qty: 0 };
+                    
+                    const tr = document.createElement('tr');
+                    
+                    // --- LOGIC LONG PRESS 2 DETIK ---
+                    let pressTimer;
+                    const longPressDuration = 2000; // 2 detik
+                    
+                    const startPress = (e) => {
+                        // Prevent default context menu pada mobile
+                        // e.preventDefault(); 
+                        pressTimer = setTimeout(() => {
+                            editRecord(origIdx);
+                        }, longPressDuration);
+                    };
+                    
+                    const cancelPress = () => {
+                        if (pressTimer) clearTimeout(pressTimer);
+                    };
+                    
+                    // Event Listeners untuk Desktop & Mobile
+                    tr.addEventListener('mousedown', startPress);
+                    tr.addEventListener('touchstart', startPress);
+                    tr.addEventListener('mouseup', cancelPress);
+                    tr.addEventListener('mouseleave', cancelPress);
+                    tr.addEventListener('touchend', cancelPress);
+                    tr.addEventListener('touchmove', cancelPress); // Batal jika user scroll
+                    // --------------------------------
+                    
+                    tr.innerHTML = `
+                    <td style="color:var(--accent-box); font-weight:bold">${item.box}</td>
+                    <td>
+                    <div>${item.part}</div>
+                    <span class="desc-text">${sysInfo.desc}</span>
+                    <div style="font-size:0.65rem; color:var(--text-muted); margin-top:2px;">(Tahan 2 detik utk edit)</div>
+                    </td>
+                    <td style="text-align:right"><i class="fas fa-check" style="color:var(--accent-part)"></i></td>
+                    `;
+                    tbody.appendChild(tr);
                 });
+            }
+            
+            function editRecord(idx) {
+                const item = scannedData[idx];
+                const sysItem = systemDataMap[item.part];
+                let htmlContent = `Box: ${item.box}<br>Part: ${item.part}<br><small>${sysItem ? sysItem.desc : ''}</small>`;
+                const deleteDbButton = `<br><br><button onclick="deletePartFromDB('${item.part}')" style="background:#444; color:#ff5252; border:1px solid #ff5252; padding:5px 10px; border-radius:5px; cursor:pointer;">⚠️ Hapus Item dr Database</button>`;
                 
-                sortedList.forEach(item => {
-                let rowClass = 'opname-match'; let textClass = 'match-text';
-                if (item.isUnregistered) { rowClass = 'opname-unknown'; textClass = 'diff-text'; }
-                else if (item.physicalQty !== item.systemQty) { rowClass = 'opname-diff'; textClass = 'diff-text'; }
-                
-                let noteHtml = "";
-                if (item.isUnregistered) noteHtml = `<br><span class="badge-new">NEW</span>`;
-                else if (item.isExtra) noteHtml = `<br><span class="badge-alert">EXTRA</span>`;
-                
-                const tr = document.createElement('tr');
-                tr.className = `opname-row ${rowClass}`;
-                tr.onclick = () => {
                 Swal.fire({
-                title: 'Koreksi Fisik', text: item.part, input: 'number', inputValue: item.physicalQty, showCancelButton: true
-                }).then(r => {
-                if(r.isConfirmed) {
-                const idx = opnameList.findIndex(x => x.part === item.part);
-                if(idx >= 0) { opnameList[idx].physicalQty = parseInt(r.value); renderOpnameTable(); }
-                }
+                    title: 'Edit Data',
+                    html: htmlContent + deleteDbButton,
+                    input: (currentMode === 'opname') ? 'number' : undefined,
+                    inputValue: (currentMode === 'opname') ? item.qty : undefined,
+                    showDenyButton: true,
+                    denyButtonText: 'Hapus History',
+                    confirmButtonText: (currentMode === 'opname') ? 'Update Qty' : 'Tutup',
+                    confirmButtonColor: 'var(--accent-part)',
+                    denyButtonColor: '#f39c12'
+                    }).then(r => {
+                    if(r.isConfirmed && currentMode === 'opname') {
+                        scannedData[idx].qty = parseInt(r.value);
+                        localStorage.setItem('wh_data', JSON.stringify(scannedData));
+                        renderWorkTable();
+                        } else if(r.isDenied) {
+                        scannedData.splice(idx, 1);
+                        localStorage.setItem('wh_data', JSON.stringify(scannedData));
+                        renderWorkTable();
+                    }
                 });
-                };
+            }
+            
+            window.deletePartFromDB = async function(part) {
+                Swal.close();
+                const isAuthorized = await verifySecurity('Menghapus Permanen');
+                if(!isAuthorized) return;
                 
-                tr.innerHTML = `
-                <td><div style="font-weight:bold">${item.part}</div><div class="desc-text">${item.desc}</div>${noteHtml}</td>
-                <td style="text-align:center"><span class="opname-counts ${textClass}" style="background:var(--bg-color)">${item.physicalQty}</span></td>
-                <td style="text-align:center; opacity:0.7">${item.systemQty}</td>
-                `;
-                tbody.appendChild(tr);
-                });
+                const initialLen = fullInventory.length;
+                fullInventory = fullInventory.filter(i => i.part !== part);
+                if(fullInventory.length < initialLen) {
+                    saveInventory();
+                    rebuildSystemMap();
+                    scannedData = scannedData.filter(i => i.part !== part);
+                    localStorage.setItem('wh_data', JSON.stringify(scannedData));
+                    renderWorkTable();
+                    updateDBStatus(fullInventory.length);
+                    populateFilters();
+                    Swal.fire('Terhapus', `Part ${part} telah dihapus.`, 'success');
                 }
+            }
+            
+            function manualSearch() {
+                const keyword = document.getElementById('searchInput').value.trim().toUpperCase();
+                const tbody = document.getElementById('search-body');
+                tbody.innerHTML = "";
+                if(!keyword) return;
                 
-                init();
-    </script>
-</body>
+                let dbResults = fullInventory.filter(i => i.part.includes(keyword) || i.desc.toUpperCase().includes(keyword));
+                if (dbResults.length > 0) {
+                    dbResults.forEach(item => {
+                        const locs = item.locations || [];
+                    let locHtml = locs.length > 0 ? `<div class="loc-wrapper">${locs.map(l=>`<span class="loc-tag"><i class="fas fa-map-marker-alt"></i> ${l}</span>`).join('')}</div>` : `<span style="color:var(--text-muted); font-size:0.8rem;">Belum Scan</span>`;
+                    
+                    // Info Kategori di Search
+                    const infoHtml = `<div>${item.part}</div><div class="desc-text">${item.desc}</div><div style="font-size:0.7rem; color:var(--accent-search)">${item.category} ${item.teknisi !== '-' ? '| '+item.teknisi : ''}</div>`;
+                    
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `<td>${locHtml}</td><td>${infoHtml}</td><td style="text-align:right">${item.qty}</td>`;
+                    tbody.appendChild(tr);
+                    });
+                    } else {
+                    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:20px; color:var(--text-muted)">Tidak ditemukan</td></tr>`;
+                    }
+                    }
+                    
+                    function cancelPending() { pendingPart = null; updateUIState(); }
+                    function resetBox() { currentBox = null; localStorage.removeItem('wh_box'); updateUIState(); }
+                    async function clearDataWithSecurity() {
+                    const isAuthorized = await verifySecurity('Reset Semua Data');
+                    if(isAuthorized) {
+                    scannedData=[]; localStorage.removeItem('wh_data'); renderWorkTable(); toggleModal(false); Swal.fire("Terhapus", "Data History scan berhasil direset.", "success");
+                    }
+                    }
+                    
+                    function exportDatabase() {
+                    if(!fullInventory.length) return Swal.fire("Info","Database kosong","info");
+                    const exportData = fullInventory.map(item => ({
+                    "PART NUMBER": item.part,
+                    "DESKRIPSI": item.desc,
+                    "QTY SYSTEM": item.qty,
+                    "LOKASI BOX": item.locations ? item.locations.join(", ") : "",
+                    "LOKASI": item.category,
+                    "TEKNISI": item.teknisi
+                    }));
+                    const ws = XLSX.utils.json_to_sheet(exportData);
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, "Database_Gudang");
+                    XLSX.writeFile(wb, `Database_Lokasi_${new Date().toISOString().slice(0,10)}.xlsx`);
+                    toggleModal(false);
+                    }
+                    
+                    function updateUIState() {
+                    const s = document.getElementById('scan-status'); 
+                    const r = document.getElementById('reader');
+                    const pendingUi = document.getElementById('pending-ui');
+                    const overlay = document.getElementById('scan-overlay');
+                    const boxEl = document.getElementById('current-box-id');
+                    if(boxEl) boxEl.innerText = currentBox ? currentBox : "-";
+                    
+                    if (currentMode === 'store') {
+                    if (pendingPart) {
+                    s.innerText = "SCAN BOX SEKARANG!";
+                    s.style.color = "var(--pending)";
+                    r.style.borderColor = "var(--pending)";
+                    pendingUi.classList.add('active');
+                    overlay.classList.add('active');
+                    document.getElementById('pending-part-display').innerText = pendingPart;
+                    document.getElementById('overlay-part').innerText = pendingPart;
+                    const item = systemDataMap[pendingPart];
+                    const locContainer = document.getElementById('existing-locs');
+                    if (item && item.locations && item.locations.length > 0) {
+                    locContainer.innerHTML = item.locations.map(l => `<span class="loc-tag"><i class="fas fa-map-marker-alt"></i> ${l}</span>`).join('');
+                    } else {
+                    locContainer.innerHTML = `<span style="color:var(--text-muted); font-size:0.8rem;">Belum ada lokasi</span>`;
+                    }
+                    } else {
+                    s.innerText = "Scan Barang (Part)";
+                    s.style.color = "var(--accent-box)";
+                    r.style.borderColor = "var(--accent-box)";
+                    pendingUi.classList.remove('active');
+                    overlay.classList.remove('active');
+                    }
+                    } else if (currentMode === 'opname') {
+                    pendingUi.classList.remove('active');
+                    overlay.classList.remove('active');
+                    if (currentBox) {
+                    s.innerText = "Siap Opname Barang";
+                    r.style.borderColor = "var(--accent-part)";
+                    } else {
+                    s.innerText = "Scan BOX Dulu";
+                    r.style.borderColor = "var(--accent-part)";
+                    }
+                    } else { 
+                    s.innerText = "Mode Cari";
+                    r.style.borderColor = "var(--accent-search)";
+                    pendingUi.classList.remove('active');
+                    overlay.classList.remove('active');
+                    }
+                    const secBadge = document.getElementById('security-alert');
+                    if(fullInventory.length === 0 && secBadge) secBadge.style.display = 'block';
+                    else if(secBadge) secBadge.style.display = 'none';
+                    }
+                    
+                    // --- LOGIC OPNAME BARU (FILTERING) ---
+                    function initOpnameList(box) {
+                    opnameList = [];
+                    
+                    // Ambil Filter Value
+                    const catSelect = document.getElementById('filter-cat');
+                    const tekSelect = document.getElementById('filter-tek');
+                    const filterCat = catSelect.value;
+                    const filterTek = tekSelect.value;
+                    
+                    fullInventory.forEach(item => {
+                    // 1. Cek Lokasi Box
+                    if (item.locations && item.locations.includes(box)) {
+                    
+                    // 2. Logic Filter Kategori
+                    let match = true;
+                    if (filterCat !== 'ALL') {
+                    if (item.category !== filterCat) match = false;
+                    // 3. Logic Filter Teknisi (Hanya jika kategori teknisi dipilih)
+                    if (match && filterCat === 'SPAREPART TEKNISI' && filterTek !== 'ALL') {
+                    if (item.teknisi !== filterTek) match = false;
+                    }
+                    }
+                    
+                    if (match) {
+                    opnameList.push({
+                    part: item.part,
+                    desc: item.desc,
+                    systemQty: item.qty, 
+                    physicalQty: 0,
+                    isExtra: false,
+                    isUnregistered: false
+                    });
+                    }
+                    }
+                    });
+                    renderOpnameTable();
+                    }
+                    
+                    async function handleExtraOpnameItem(part) {
+                    const sysItem = systemDataMap[part];
+                    let titleTxt = "Barang Salah Lokasi?";
+                    let htmlTxt = "";
+                    let confirmBtn = "Ya, Tambahkan";
+                    let isUnregistered = false;
+                    
+                    if (sysItem) {
+                    // Info tentang barang yang ada di DB tapi salah box
+                    let locInfo = sysItem.locations && sysItem.locations.length > 0 ? `<b>${sysItem.locations.join(', ')}</b>` : "Belum ada lokasi";
+                    htmlTxt = `
+                    <div style="font-weight:bold; font-size:1.1rem">${part}</div>
+                    <div>${sysItem.desc}</div>
+                    <div style="margin:10px 0; font-size:0.85rem; color:#888">
+                        Kategori: <b>${sysItem.category}</b><br>
+                        Lokasi Terdaftar: ${locInfo}
+                    </div>
+                    <p>Tambah ke Box <b>${currentBox}</b>?</p>
+                    `;
+                    } else {
+                    titleTxt = "Barang Tidak Dikenal";
+                    htmlTxt = `
+                    <div style="font-weight:bold; font-size:1.1rem; color:var(--accent-search)">${part}</div>
+                    <div style="margin:10px 0; background:var(--input-bg); padding:10px; border-radius:5px">
+                        <i class="fas fa-exclamation-circle"></i> Tidak ada di Database
+                    </div>
+                    <p>Masukkan paksa ke box ini?</p>
+                    `;
+                    confirmBtn = "Ya, Masukkan";
+                    isUnregistered = true;
+                    }
+                    
+                    const result = await Swal.fire({
+                    title: titleTxt,
+                    html: htmlTxt,
+                    icon: isUnregistered ? 'question' : 'warning',
+                    showCancelButton: true,
+                    confirmButtonText: confirmBtn,
+                    confirmButtonColor: isUnregistered ? 'var(--accent-search)' : 'var(--pending)'
+                    });
+                    
+                    if (result.isConfirmed) {
+                    opnameList.unshift({
+                    part: part,
+                    desc: sysItem ? sysItem.desc : 'Item Baru',
+                    systemQty: 0,
+                    physicalQty: 1, // Start 1
+                    isExtra: !isUnregistered,
+                    isUnregistered: isUnregistered
+                    });
+                    
+                    // Update memory lokasi jika registered
+                    if(!isUnregistered && sysItem) {
+                    if(!sysItem.locations) sysItem.locations = [];
+                    if(!sysItem.locations.includes(currentBox)) sysItem.locations.push(currentBox);
+                    }
+                    
+                    renderOpnameTable();
+                    triggerCooldownAnimation();
+                    }
+                    html5QrCode.resume();
+                    }
+                    
+                    function updateOpnameCount(part, qty) {
+                    let itemIndex = opnameList.findIndex(i => i.part === part);
+                    if (itemIndex >= 0) {
+                    opnameList[itemIndex].physicalQty += qty;
+                    renderOpnameTable();
+                    }
+                    }
+                    
+                    function renderOpnameTable() {
+                    if(currentMode !== 'opname') return;
+                    const tbody = document.getElementById('result-body');
+                    const thead = document.getElementById('table-header');
+                    
+                    thead.innerHTML = `<tr><th width="50%">Part Info</th><th width="25%" style="text-align:center">Fisik</th><th width="25%" style="text-align:center">Sys Total</th></tr>`;
+                    tbody.innerHTML = "";
+                    
+                    if(opnameList.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:20px; color:var(--text-muted)">Box Kosong / Tidak Sesuai Filter</td></tr>`;
+                    return;
+                    }
+                    
+                    const sortedList = [...opnameList].sort((a, b) => {
+                    if (a.isUnregistered && !b.isUnregistered) return -1;
+                    if (!a.isUnregistered && b.isUnregistered) return 1;
+                    if (a.isExtra && !b.isExtra) return -1;
+                    if (!a.isExtra && b.isExtra) return 1;
+                    const aDiff = a.physicalQty !== a.systemQty;
+                    const bDiff = b.physicalQty !== b.systemQty;
+                    if (aDiff && !bDiff) return -1;
+                    return 0;
+                    });
+                    
+                    sortedList.forEach(item => {
+                    let rowClass = 'opname-match'; let textClass = 'match-text';
+                    if (item.isUnregistered) { rowClass = 'opname-unknown'; textClass = 'diff-text'; }
+                    else if (item.physicalQty !== item.systemQty) { rowClass = 'opname-diff'; textClass = 'diff-text'; }
+                    
+                    let noteHtml = "";
+                    if (item.isUnregistered) noteHtml = `<br><span class="badge-new">NEW</span>`;
+                    else if (item.isExtra) noteHtml = `<br><span class="badge-alert">EXTRA</span>`;
+                    
+                    const tr = document.createElement('tr');
+                    tr.className = `opname-row ${rowClass}`;
+                    tr.onclick = () => {
+                    Swal.fire({
+                    title: 'Koreksi Fisik', text: item.part, input: 'number', inputValue: item.physicalQty, showCancelButton: true
+                    }).then(r => {
+                    if(r.isConfirmed) {
+                    const idx = opnameList.findIndex(x => x.part === item.part);
+                    if(idx >= 0) { opnameList[idx].physicalQty = parseInt(r.value); renderOpnameTable(); }
+                    }
+                    });
+                    };
+                    
+                    tr.innerHTML = `
+                    <td><div style="font-weight:bold">${item.part}</div><div class="desc-text">${item.desc}</div>${noteHtml}</td>
+                    <td style="text-align:center"><span class="opname-counts ${textClass}" style="background:var(--bg-color)">${item.physicalQty}</span></td>
+                    <td style="text-align:center; opacity:0.7">${item.systemQty}</td>
+                    `;
+                    tbody.appendChild(tr);
+                    });
+                    }
+                    
+                    init();
+        </script>
+    </body>
 </html>
