@@ -414,8 +414,8 @@
 				}
 			}
 			
-            // --- HANDLE FILE (VERSI FINAL YANG BENAR) ---
-			function handleFile(input) {
+            // --- HANDLE FILE: MODE "ANTI-AMNESIA" (AUTO MERGE) ---
+            function handleFile(input) {
                 const file = input.files[0];
                 if (!file) return;
                 
@@ -429,75 +429,108 @@
                         
                         if (json.length < 2) throw new Error("File Excel kosong");
                         
-                        // --- VARIABLE MAPPING ---
+                        // --- MAPPING HEADER ---
                         let idxPart = -1;
                         let idxDesc = -1;
                         let idxQty = -1;
-                        let idxTipeLokasi = -1; // VARIABEL UTAMA FILTER
+                        let idxTipeLokasi = -1; 
                         let idxTeknisi = -1;
                         let idxAttr = -1;
 						
                         const headers = json[0].map(h => h ? h.toString().toLowerCase().trim() : "");
-                        console.log("Header terbaca:", headers);
-						
+                        
                         headers.forEach((h, i) => {
                             if (h === 'part' || h === 'part number') idxPart = i;
                             if (h === 'deskripsi part' || h === 'deskripsi') idxDesc = i;
                             if (h === 'available qty' || h === 'qty system') idxQty = i;
-                            
-                            // FILTER: TIPE LOKASI / KATEGORI / LOKASI
                             if (h === 'tipe lokasi' || h === 'kategori' || h === 'lokasi') idxTipeLokasi = i; 
-                            
                             if (h === 'nama' || h === 'teknisi') idxTeknisi = i;
-                            // Attribute / Lokasi Box
                             if (h === 'attribute' || h === 'lokasi box') idxAttr = i;
 						});
 
-                        // Validasi biar user tau kalau header salah
-                        if (idxTipeLokasi === -1) console.warn("Kolom 'Tipe Lokasi' tidak ditemukan, kategori akan jadi GENERAL");
-						
-                        fullInventory = [];
+                        if (idxTipeLokasi === -1) console.warn("Kolom Tipe Lokasi tidak ditemukan.");
+                        if (idxPart === -1) throw new Error("Kolom PART NUMBER tidak ditemukan!");
+
+                        // 1. SIAPKAN DATA LAMA (UNTUK DIINTIP LOKASINYA)
+                        let oldMap = {};
+                        if (fullInventory.length > 0) {
+                            fullInventory.forEach(item => {
+                                oldMap[item.part] = item;
+                            });
+                        }
+
+                        let newInventory = [];
+                        let preservedCount = 0; // Hitung berapa lokasi yang diselamatkan
                         
+                        // 2. PROSES DATA BARU DARI EXCEL
                         for (let i = 1; i < json.length; i++) {
                             const row = json[i];
                             if (row[idxPart]) {
-                                // 1. Ambil Lokasi (Box)
-                                let locs = [];
+                                const pPart = row[idxPart].toString().trim().toUpperCase();
+                                
+                                // A. Cek Lokasi dari Excel (Biasanya kosong kalau master ASR1)
+                                let excelLocs = [];
                                 if (idxAttr >= 0 && row[idxAttr]) {
                                     let raw = row[idxAttr].toString().trim().toUpperCase();
                                     if(raw && raw !== '-' && raw !== '0') {
-                                        locs = raw.split(',').map(s=>s.trim());
+                                        excelLocs = raw.split(',').map(s=>s.trim());
                                     }
 								}
                                 
-                                // 2. Ambil Kategori (Menggunakan idxTipeLokasi yang sudah fix)
+                                // B. LOGIKA PENYELAMAT LOKASI (THE SAVIOR)
+                                // Jika Excel tidak bawa lokasi, kita cari di memori lama
+                                if (excelLocs.length === 0 && oldMap[pPart]) {
+                                    if (oldMap[pPart].locations && oldMap[pPart].locations.length > 0) {
+                                        excelLocs = oldMap[pPart].locations; // AMBIL LOKASI LAMA
+                                        preservedCount++;
+                                    }
+                                }
+                                
                                 let cat = (idxTipeLokasi >= 0 && row[idxTipeLokasi]) ? row[idxTipeLokasi].toString().toUpperCase().trim() : "GENERAL";
                                 let tek = (idxTeknisi >= 0 && row[idxTeknisi]) ? row[idxTeknisi].toString().toUpperCase().trim() : "-";
 								
-                                fullInventory.push({
-                                    part: row[idxPart].toString().trim().toUpperCase(),
+                                newInventory.push({
+                                    part: pPart,
                                     desc: row[idxDesc] || "-",
-                                    qty: parseFloat(row[idxQty]) || 0,
-                                    locations: locs, // Ini bakal terisi saat kamu scan di Tab 'Simpan' atau dari Attribute
-                                    category: cat,   // Ini buat filter dropdown
+                                    qty: parseFloat(row[idxQty]) || 0, // Update Stok dari Excel Baru
+                                    locations: excelLocs, // Lokasi Aman (Entah dari Excel atau hasil Restore)
+                                    category: cat,   
                                     teknisi: tek
 								});
 							}
 						}
+
+                        // 3. SIMPAN HASIL PENGGABUNGAN
+                        fullInventory = newInventory;
                         
                         saveInventory();
                         rebuildSystemMap();
                         updateDBStatus(fullInventory.length);
                         populateFilters();
                         
-                         // Reset Opname State agar data baru terbaca
+                        // Auto refresh jika sedang buka box
                         if (currentBox) {
                              localStorage.removeItem('wh_opname_state');
                              initOpnameList(currentBox);
                         }
 
                         toggleModal(false);
-                        Swal.fire("Sip!", `Data ASR1 Loaded: ${fullInventory.length} Items.`, "success");
+                        
+                        // Laporan ke User
+                        let msg = `Total Data: ${fullInventory.length} Items.`;
+                        if (preservedCount > 0) {
+                            msg += `<br><br><b>${preservedCount} Data Lokasi Box</b> berhasil diamankan dari database sebelumnya! 🛡️`;
+                        } else {
+                            msg += `<br><small>Data murni dari Excel (tidak ada lokasi lama yang perlu digabung).</small>`;
+                        }
+                        
+                        Swal.fire({
+                            title: "Update Sukses!",
+                            html: msg,
+                            icon: "success"
+                        });
+                        
+                        renderWorkTable();
                         
 					} catch (err) {
                         console.error(err);
@@ -505,6 +538,7 @@
 					}
 				};
                 reader.readAsArrayBuffer(file);
+                input.value = ''; // Reset input
 			}
 			
 			// --- FILTER LOGIC ---
