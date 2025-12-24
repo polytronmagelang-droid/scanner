@@ -661,6 +661,7 @@
     }
 
     // --- HANDLE EXCEL (AUTO MERGE + SAVE NOTE + DB) ---
+    // --- HANDLE EXCEL (FIX: DETEKSI KOLOM PART NUMBER) ---
     function handleFile(input) {
         const file = input.files[0];
         if (!file) return;
@@ -680,25 +681,25 @@
                 const headers = json[0].map(h => h ? h.toString().toLowerCase().trim() : "");
 
                 headers.forEach((h, i) => {
-                    // [PERBAIKAN] Deteksi Part Number lebih ketat agar tidak tertukar dengan Deskripsi
-                    if (h === 'part' || h === 'part number' || (h.includes('part') && !h.includes('deskripsi'))) {
+                    // [PERBAIKAN UTAMA DISINI]
+                    // Pastikan kolom "Part" tidak tertukar dengan "Deskripsi Part"
+                    if (h === 'part' || h === 'part number' || (h.includes('part') && !h.includes('deskripsi') && !h.includes('name'))) {
                         idxPart = i;
                     }
                     
-                    if (h.includes('deskripsi')) idxDesc = i;
-                    if (h.includes('available qty') || h.includes('qty system')) idxQty = i;
+                    if (h.includes('deskripsi') || h.includes('description') || h === 'nama part') idxDesc = i;
+                    if (h.includes('available qty') || h.includes('qty system') || h === 'qty') idxQty = i;
                     if (h.includes('tipe lokasi') || h === 'kategori' || h === 'lokasi') idxTipeLokasi = i;
-                    if (h.includes('nama') || h.includes('teknisi')) idxTeknisi = i;
+                    if (h === 'nama' || h.includes('teknisi') || h.includes('pemegang')) idxTeknisi = i;
                     if (h.includes('attribute') || h.includes('lokasi box')) idxAttr = i;
                 });
 
-                if (idxPart === -1) throw new Error("Kolom PART NUMBER tidak ditemukan!");
+                if (idxPart === -1) throw new Error("Kolom PART NUMBER tidak ditemukan! Cek header Excel.");
 
+                // Siapkan Data Lama (untuk merge lokasi/catatan)
                 let oldMap = {};
                 if (fullInventory.length > 0) {
-                    fullInventory.forEach(item => {
-                        oldMap[item.part] = item;
-                    });
+                    fullInventory.forEach(item => oldMap[item.part] = item);
                 }
 
                 let newInventory = [];
@@ -709,6 +710,7 @@
                     if (row[idxPart]) {
                         const pPart = row[idxPart].toString().trim().toUpperCase();
 
+                        // Ambil Lokasi Box (jika ada di file excel)
                         let excelLocs = [];
                         if (idxAttr >= 0 && row[idxAttr]) {
                             let raw = row[idxAttr].toString().trim().toUpperCase();
@@ -717,14 +719,15 @@
                             }
                         }
 
-                        if (excelLocs.length === 0 && oldMap[pPart]) {
-                            if (oldMap[pPart].locations && oldMap[pPart].locations.length > 0) {
-                                excelLocs = oldMap[pPart].locations;
-                                preservedCount++;
-                            }
+                        // Merge Lokasi Lama (jika di excel kosong)
+                        if (excelLocs.length === 0 && oldMap[pPart] && oldMap[pPart].locations) {
+                            excelLocs = oldMap[pPart].locations;
+                            preservedCount++;
                         }
 
+                        // Merge Catatan Lama
                         let savedNote = (oldMap[pPart] && oldMap[pPart].note) ? oldMap[pPart].note : "";
+
                         let cat = (idxTipeLokasi >= 0 && row[idxTipeLokasi]) ? row[idxTipeLokasi].toString().toUpperCase().trim() : "GENERAL";
                         let tek = (idxTeknisi >= 0 && row[idxTeknisi]) ? row[idxTeknisi].toString().toUpperCase().trim() : "-";
 
@@ -742,24 +745,15 @@
 
                 fullInventory = newInventory;
 
-                await saveFullInventoryToDB(); // SIMPAN KE DB
-                rebuildSystemMap();
+                await saveFullInventoryToDB();
+                rebuildSystemMap(); // Penting: Rebuild map agar prioritas benar
                 updateDBStatus(fullInventory.length);
                 populateFilters();
 
-                if (currentMode === 'opname') {
-                    if (opnameCategoryMode === 'GUDANG' && currentBox) initOpnameList(currentBox);
-                    else if (opnameCategoryMode === 'TEKNISI' && currentTeknisi) initOpnameList(null);
-                }
-
                 toggleModal(false);
-
                 let msg = `Total Data: ${fullInventory.length} Items.`;
-                if (preservedCount > 0) {
-                    msg += `<br><br><b>${preservedCount} Data Lokasi Box</b> berhasil diamankan! 🛡️`;
-                }
-
-                Swal.fire({ title: "Update Sukses!", html: msg, icon: "success" });
+                if (preservedCount > 0) msg += `<br>Lokasi Aman: ${preservedCount}`;
+                Swal.fire({ title: "Import Sukses!", html: msg, icon: "success" });
                 renderWorkTable();
 
             } catch (err) {
@@ -836,16 +830,31 @@
         }
     }
 
+    // --- REBUILD MAP (FIX: PRIORITASKAN SPAREPART BAIK) ---
     function rebuildSystemMap() {
         systemDataMap = {};
         fullInventory.forEach(item => {
-            if (!systemDataMap[item.part]) {
-                systemDataMap[item.part] = item;
+            const part = item.part;
+            
+            // Ambil kategori dan pastikan string aman (uppercase)
+            const cat = (item.category || "").toUpperCase();
+            const isTeknisi = cat.includes('TEKNISI');
+
+            if (!systemDataMap[part]) {
+                // Jika belum ada di map, masukkan saja
+                systemDataMap[part] = item;
             } else {
-                const currentIsTeknisi = systemDataMap[item.part].category.includes('TEKNISI');
-                const newIsTeknisi = item.category.includes('TEKNISI');
-                if (currentIsTeknisi && !newIsTeknisi) {
-                    systemDataMap[item.part] = item;
+                // Jika SUDAH ada di map, cek prioritasnya
+                const existingItem = systemDataMap[part];
+                const existingCat = (existingItem.category || "").toUpperCase();
+                const existingIsTeknisi = existingCat.includes('TEKNISI');
+
+                // LOGIKA UTAMA:
+                // Jika data yg ada di map adalah TEKNISI, sedangkan data baru BUKAN TEKNISI (Gudang/Baik)
+                // Maka GANTI data di map dengan data baru ini.
+                // (Kita ingin Map selalu memegang data 'Gudang' jika tersedia)
+                if (existingIsTeknisi && !isTeknisi) {
+                    systemDataMap[part] = item;
                 }
             }
         });
