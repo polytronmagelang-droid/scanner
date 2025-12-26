@@ -116,7 +116,7 @@
 			.modal-content{background:var(--card-bg);width:85%;max-width:350px;height:100%;padding:25px;box-sizing:border-box;box-shadow:-10px 0 30px black;transform:translateX(100%);transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);overflow-y:auto;display:flex;flex-direction:column}
 			.modal.show .modal-content{transform:translateX(0)}
 			.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:30px;border-bottom:1px solid var(--border-color);padding-bottom:15px}
-			.btn-menu{width:100%;padding:14px;border:none;border-radius:10px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:15px;margin-bottom:12px;font-size:0.95rem;text-align:left;transition:transform 0.1s}
+			.store-row { scroll-margin-top: 300px; /* Jarak aman dari atas layar */}			.btn-menu{width:100%;padding:14px;border:none;border-radius:10px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:15px;margin-bottom:12px;font-size:0.95rem;text-align:left;transition:transform 0.1s}
 			.btn-menu:active{transform:scale(0.98)}
 			.btn-menu.upload{background:var(--accent-box);color:white}
 			.btn-menu.theme{background:var(--input-bg);color:var(--text-color);border:1px solid var(--border-color)}
@@ -649,6 +649,7 @@
 			}
 			
 			// --- HANDLE EXCEL ---
+			// --- HANDLE EXCEL (FIXED: DETEKSI KOLOM NAMA TEKNISI) ---
 			function handleFile(input) {
 				const file = input.files[0];
 				if (!file) return;
@@ -663,23 +664,40 @@
 						
 						if (json.length < 2) throw new Error("File Excel kosong");
 						
+						// Inisialisasi Index
 						let idxPart = -1, idxDesc = -1, idxQty = -1, idxTipeLokasi = -1, idxTeknisi = -1, idxAttr = -1;
 						
+						// Ambil Header (Baris 1) & Bersihkan spasi/huruf kecil
 						const headers = json[0].map(h => h ? h.toString().toLowerCase().trim() : "");
 						
 						headers.forEach((h, i) => {
-							if (h === 'part' || h === 'part number' || (h.includes('part') && !h.includes('deskripsi') && !h.includes('name'))) {
+							// 1. Cari Part Number
+							if (h === 'part' || h === 'part number' || (h.includes('part') && !h.includes('deskripsi') && !h.includes('name') && !h.includes('nama'))) {
 								idxPart = i;
 							}
+							
+							// 2. Cari Deskripsi
 							if (h.includes('deskripsi') || h.includes('description') || h === 'nama part') idxDesc = i;
+							
+							// 3. Cari Qty
 							if (h.includes('available qty') || h.includes('qty system') || h === 'qty') idxQty = i;
+							
+							// 4. Cari Kategori/Tipe (Baik/Teknisi/Bekas)
 							if (h.includes('tipe lokasi') || h === 'kategori' || h === 'lokasi') idxTipeLokasi = i;
-							if (h === 'nama' || h.includes('teknisi') || h.includes('pemegang')) idxTeknisi = i;
+							
+							// 5. [FIXED] Cari Nama Teknisi (Target Kolom G: "Nama")
+							// Kita cari yang match persis "nama" (untuk membedakan dengan "nama part") atau "teknisi"
+							if (h === 'nama' || h === 'teknisi' || h === 'pemegang' || h === 'nama teknisi') {
+								idxTeknisi = i;
+							}
+							
+							// 6. Cari Lokasi Box (jika import balik)
 							if (h.includes('attribute') || h.includes('lokasi box')) idxAttr = i;
 						});
 						
 						if (idxPart === -1) throw new Error("Kolom PART NUMBER tidak ditemukan! Cek header Excel.");
 						
+						// --- Mulai Parsing Data ---
 						let oldMap = {};
 						if (fullInventory.length > 0) {
 							fullInventory.forEach(item => oldMap[item.part] = item);
@@ -693,6 +711,7 @@
 							if (row[idxPart]) {
 								const pPart = row[idxPart].toString().trim().toUpperCase();
 								
+								// Logic Lokasi & Note (Sama seperti sebelumnya)
 								let excelLocs = [];
 								if (idxAttr >= 0 && row[idxAttr]) {
 									let raw = row[idxAttr].toString().trim().toUpperCase();
@@ -700,16 +719,20 @@
 										excelLocs = raw.split(',').map(s => s.trim());
 									}
 								}
-								
 								if (excelLocs.length === 0 && oldMap[pPart] && oldMap[pPart].locations) {
 									excelLocs = oldMap[pPart].locations;
 									preservedCount++;
 								}
-								
 								let savedNote = (oldMap[pPart] && oldMap[pPart].note) ? oldMap[pPart].note : "";
 								
+								// Logic Data Utama
 								let cat = (idxTipeLokasi >= 0 && row[idxTipeLokasi]) ? row[idxTipeLokasi].toString().toUpperCase().trim() : "GENERAL";
-								let tek = (idxTeknisi >= 0 && row[idxTeknisi]) ? row[idxTeknisi].toString().toUpperCase().trim() : "-";
+								
+								// [FIX] Ambil Nama Teknisi
+								let tek = "-";
+								if (idxTeknisi >= 0 && row[idxTeknisi]) {
+									tek = row[idxTeknisi].toString().trim().toUpperCase();
+								}
 								
 								newInventory.push({
 									part: pPart,
@@ -717,7 +740,7 @@
 									qty: parseFloat(row[idxQty]) || 0,
 									locations: excelLocs,
 									category: cat,
-									teknisi: tek,
+									teknisi: tek, // Data ini sekarang benar
 									note: savedNote
 								});
 							}
@@ -875,6 +898,7 @@
 					tbody.innerHTML = "";
 					renderedStoreCount = 0;
 					
+					// Filter data: Hanya tampilkan yang BUKAN teknisi
 					filteredStoreData = fullInventory.filter(i => i.category !== 'SPAREPART TEKNISI');
 					if (currentStoreView === 'unboxed') {
 						filteredStoreData = filteredStoreData.filter(i => !i.locations || i.locations.length === 0);
@@ -892,7 +916,12 @@
 				for (let i = renderedStoreCount; i < nextTarget; i++) {
 					const item = filteredStoreData[i];
 					const tr = document.createElement('tr');
+					
+					// ID unik untuk fitur jump/scroll
 					tr.id = `store-row-${item.part}`;
+					
+					// [UPDATE PENTING] Tambahkan class ini agar CSS scroll-margin-top bekerja
+					tr.className = 'store-row'; 
 					
 					let locHtml = (item.locations && item.locations.length > 0) ?
 					item.locations.map(l => `<span class="loc-tag" style="font-size:0.8rem; margin-left:4px;">${l}</span>`).join('') :
@@ -904,13 +933,13 @@
 					<td style="padding: 12px 15px;">
 					<div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:5px;">
 					<div style="font-weight:bold; font-size:1.05rem; color:var(--text-color); margin-right:10px;">
-					${item.part}
+                    ${item.part}
 					</div>
 					<div style="display:flex; align-items:center; white-space:nowrap;">
-					<div>${locHtml}</div>
-					<button class="btn-edit-icon" onclick="editPartNote('${item.part}')" style="float:none; margin-left:8px; font-size:0.85rem; padding:0;">
+                    <div>${locHtml}</div>
+                    <button class="btn-edit-icon" onclick="editPartNote('${item.part}')" style="float:none; margin-left:8px; font-size:0.85rem; padding:0;">
 					<i class="fas fa-pencil-alt"></i>
-					</button>
+                    </button>
 					</div>
 					</div>
 					<div class="desc-text" style="font-size:0.85rem; color:var(--text-muted); line-height:1.4;">
@@ -1371,373 +1400,396 @@
 			}
 			
 			function manualSearch() {
-				const keyword = document.getElementById('searchInput').value.trim().toUpperCase();
-				const tbody = document.getElementById('search-body');
-				tbody.innerHTML = "";
-				if (!keyword) return;
-				
-				let dbResults = fullInventory.filter(i => i.part.includes(keyword) || i.desc.toUpperCase().includes(keyword));
-				
-				if (dbResults.length === 0) {
-					tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:20px; color:var(--text-muted)">Tidak ditemukan</td></tr>`;
-				}
-				
-				dbResults.forEach(item => {
-					const realIndex = fullInventory.indexOf(item);
-					const locs = item.locations || [];
-					let locHtml = locs.length > 0 ?
-				`<div class="loc-wrapper">${locs.map(l=>`<span class="loc-tag"><i class="fas fa-map-marker-alt"></i> ${l}</span>`).join('')}</div>` :
-				`<span style="color:var(--text-muted); font-size:0.8rem;">Belum Scan</span>`;
-				
-				const isTeknisi = item.category.toUpperCase().includes('TEKNISI');
-				const catColor = isTeknisi ? 'var(--accent-search)' : 'var(--accent-part)';
-				
-				const tr = document.createElement('tr');
-				tr.onclick = () => manageSearchItem(realIndex);
-				tr.innerHTML = `
-				<td>${locHtml}</td>
-				<td>
-					<div style="font-weight:bold">${item.part}</div>
-					<div class="desc-text">${item.desc}</div>
-					<div style="font-size:0.65rem; color:${catColor}; font-weight:bold; margin-top:2px;">
-						${item.category} ${item.teknisi && item.teknisi !== '-' ? '| ' + item.teknisi : ''}
-					</div>
-					<div style="font-size:0.6rem; color:#666; margin-top:4px;">(Klik untuk kelola)</div>
-				</td>
-				<td style="text-align:right">${item.qty}</td>`;
-				tbody.appendChild(tr);
-				});
-				}
-				
-				function manageSearchItem(index) {
-				const item = fullInventory[index];
-				let options = {};
-				if (item.locations && item.locations.length > 0) {
-				options = {
-				title: 'Kelola Item',
-				html: `<b>${item.part}</b><br>${item.category}<br><br>Lokasi saat ini: <b>${item.locations.join(', ')}</b>`,
-				showDenyButton: true,
-				showCancelButton: true,
-				confirmButtonText: 'Tutup',
-				denyButtonText: '🗑️ Hapus Lokasi Box',
-				denyButtonColor: '#d33'
-				};
-				} else {
-				options = {
-				title: 'Info Item',
-				html: `<b>${item.part}</b><br>${item.category}<br><br>Status: Belum masuk box`,
-				confirmButtonText: 'Oke'
-				};
-				}
-				
-				Swal.fire(options).then((result) => {
-				if (result.isDenied) {
-				Swal.fire({
-				title: 'Hapus Lokasi?',
-				text: `Lokasi box akan dihapus dari data ${item.category} ini.`,
-				icon: 'warning',
-				showCancelButton: true,
-				confirmButtonText: 'Ya, Hapus!'
-				}).then((conf) => {
-				if (conf.isConfirmed) {
-				item.locations = [];
-				saveInventory();
-				rebuildSystemMap();
-				manualSearch();
-				Swal.fire('Terhapus', 'Lokasi berhasil dikosongkan.', 'success');
-				}
-				});
-				}
-				});
-				}
-				
-				function cancelPending() {
-				pendingPart = null;
-				updateUIState();
-				}
-				
-				function resetBox() {
-				currentBox = null;
-				localStorage.removeItem('wh_box');
-				localStorage.removeItem('wh_opname_state');
-				updateUIState();
-				opnameList = [];
-				renderOpnameTable();
-				}
-				
-				async function clearDataWithSecurity() {
-				const isAuthorized = await verifySecurity('Reset Semua Data');
-				if (isAuthorized) {
-				scannedData = [];
-				await clearDB(); 
-				fullInventory = []; 
-				localStorage.removeItem('wh_data');
-				renderWorkTable();
-				updateDBStatus(0);
-				toggleModal(false);
-				Swal.fire("Terhapus", "Data History scan berhasil direset.", "success");
-				}
-				}
-				
-				function exportDatabase() {
-				if (!fullInventory.length) return Swal.fire("Info", "Database kosong", "info");
-				const exportData = fullInventory.map(item => ({
-				"PART NUMBER": item.part,
-				"DESKRIPSI": item.desc,
-				"QTY SYSTEM": item.qty,
-				"LOKASI BOX": item.locations ? item.locations.join(", ") : "",
-				"KATEGORI": item.category,
-				"TEKNISI": item.teknisi
-				}));
-				
-				const ws = XLSX.utils.json_to_sheet(exportData);
-				const wb = XLSX.utils.book_new();
-				XLSX.utils.book_append_sheet(wb, ws, "Database_Gudang");
-				const dateStr = new Date().toISOString().slice(0, 10);
-				XLSX.writeFile(wb, `Data_Gudang_${dateStr}.xlsx`);
-				toggleModal(false);
-				}
-				
-				function updateUIState() {
-				const s = document.getElementById('scan-status');
-				const r = document.getElementById('reader');
-				const pendingUi = document.getElementById('pending-ui');
-				const overlay = document.getElementById('scan-overlay');
-				const boxEl = document.getElementById('current-box-id');
-				const btnManual = document.querySelector('.btn-manual-scan');
-				
-				if (boxEl) boxEl.innerText = currentBox ? currentBox : "-";
-				
-				if (currentMode === 'opname') {
-				if (btnManual) btnManual.style.display = 'none';
-				} else {
-				if (btnManual) btnManual.style.display = 'flex';
-				}
-				
-				if (currentMode === 'store') {
-				if (pendingPart) {
-				s.innerText = "SCAN BOX SEKARANG!";
-				s.style.color = "var(--pending)";
-				r.style.borderColor = "var(--pending)";
-				pendingUi.classList.add('active');
-				overlay.classList.add('active');
-				document.getElementById('pending-part-display').innerText = pendingPart;
-				document.getElementById('overlay-part').innerText = pendingPart;
-				const item = systemDataMap[pendingPart];
-				const locContainer = document.getElementById('existing-locs');
-				if (item && item.locations && item.locations.length > 0) {
-				locContainer.innerHTML = item.locations.map(l => `<span class="loc-tag"><i class="fas fa-map-marker-alt"></i> ${l}</span>`).join('');
-				} else {
-				locContainer.innerHTML = `<span style="color:var(--text-muted); font-size:0.8rem;">Belum ada lokasi</span>`;
-				}
-				} else {
-				s.innerText = "Scan Barang (Part)";
-				s.style.color = "var(--accent-box)";
-				r.style.borderColor = "var(--accent-box)";
-				pendingUi.classList.remove('active');
-				overlay.classList.remove('active');
-				}
-				} else if (currentMode === 'opname') {
-				pendingUi.classList.remove('active');
-				overlay.classList.remove('active');
-				if (opnameCategoryMode === 'GUDANG') {
-				s.innerText = currentBox ? "Siap Opname Box" : "Scan BOX Dulu";
-				} else {
-				s.innerText = currentTeknisi ? "Siap Opname Teknisi" : "Pilih Teknisi Dulu";
-				}
-				r.style.borderColor = "var(--accent-part)";
-				} else {
-				s.innerText = "Mode Cari";
-				r.style.borderColor = "var(--accent-search)";
-				pendingUi.classList.remove('active');
-				overlay.classList.remove('active');
-				}
-				const secBadge = document.getElementById('security-alert');
-				if (fullInventory.length === 0 && secBadge) secBadge.style.display = 'block';
-				else if (secBadge) secBadge.style.display = 'none';
-				}
-				
-				function saveOpnameState() {
-				const state = {
-				box: currentBox,
-				list: opnameList
-				};
-				localStorage.setItem('wh_opname_state', JSON.stringify(state));
-				}
-				
-				function scrollToPart(part) {
-				setTimeout(() => {
-				const row = document.getElementById(`opname-row-${part}`);
-				if (row) {
-				row.scrollIntoView({
-				behavior: 'smooth',
-				block: 'center'
-				});
-				row.classList.add('highlight-flash');
-				setTimeout(() => row.classList.remove('highlight-flash'), 2000);
-				}
-				}, 100);
-				}
-				
-				function initOpnameList(box) {
-				opnameList = [];
-				if (opnameCategoryMode === 'GUDANG') {
-				fullInventory.forEach(item => {
-				if (item.locations && item.locations.includes(box)) {
-				if (item.category !== 'SPAREPART TEKNISI') {
-				opnameList.push(createOpnameItem(item));
-				}
-				}
-				});
-				if (box) {
-				const totalItem = opnameList.length;
-				const badge = document.getElementById('box-part-count');
-				if (badge) badge.innerText = `${totalItem} Items`;
-				}
-				} else {
-				fullInventory.forEach(item => {
-				if (item.category === 'SPAREPART TEKNISI' && item.teknisi === currentTeknisi) {
-				opnameList.push(createOpnameItem(item));
-				}
-				});
-				}
-				saveOpnameState();
-				renderOpnameTable();
-				}
-				
-				function createOpnameItem(item) {
-				return {
-				part: item.part,
-				desc: item.desc,
-				systemQty: item.qty,
-				physicalQty: 0,
-				isExtra: false,
-				isUnregistered: false
-				};
-				}
-				
-				function updateOpnameCount(part, delta) {
-				const idx = opnameList.findIndex(i => i.part === part);
-				if (idx >= 0) {
-				opnameList[idx].physicalQty += delta;
-				if (opnameList[idx].physicalQty < 0) opnameList[idx].physicalQty = 0;
-				saveOpnameState();
-				renderOpnameTable();
-				scrollToPart(part);
-				}
-				}
-				
-				function setOpnameFilter(view) {
-				currentOpnameView = view;
-				document.querySelectorAll('.segment-btn').forEach(b => b.classList.remove('active'));
-					document.getElementById(`seg-${view}`).classList.add('active');
+    const keyword = document.getElementById('searchInput').value.trim().toUpperCase();
+    const tbody = document.getElementById('search-body'); 
+    tbody.innerHTML = ""; 
+    if(!keyword) return;
+    
+    let results = fullInventory.filter(i => i.part.includes(keyword) || i.desc.toUpperCase().includes(keyword));
+    
+    if(results.length > 0) {
+        results.forEach(item => {
+            const locs = item.locations || [];
+            
+            // --- [UPDATE] Copy Part Number (Bukan Lokasi) ---
+            const textToCopy = item.part; 
+            // ------------------------------------------------
+            
+            let locHtml = locs.length > 0 ?
+                `<div class="loc-wrapper">${locs.map(l=>`<span class="loc-tag"><i class="fas fa-map-marker-alt"></i> ${l}</span>`).join('')}</div>` :
+                `<span style="color:var(--text-muted); font-size:0.8rem;">Belum Scan</span>`;
+
+            // Logika Nama Teknisi
+            const isTeknisi = item.category.toUpperCase().includes('TEKNISI');
+            const catColor = isTeknisi ? 'var(--accent-search)' : 'var(--accent-part)';
+            let displayCategory = isTeknisi ? (item.teknisi || "Teknisi Tanpa Nama") : item.category;
+
+            const tr = document.createElement('tr');
+            
+            // Klik baris untuk Copy Part Number
+            tr.onclick = () => {
+                navigator.clipboard.writeText(textToCopy).then(() => {
+                    Swal.mixin({
+                        toast: true, position: 'center', showConfirmButton: false, timer: 1000,
+                        didOpen: (toast) => {
+                            toast.style.background = 'rgba(0,0,0,0.8)';
+                            toast.style.color = 'white';
+                        }
+                    }).fire({ icon: 'success', title: `Copied: ${textToCopy}` });
+                });
+            };
+            
+            tr.innerHTML = `
+                <td>
+                    ${locHtml}
+                </td>
+                <td>
+                    <div style="font-weight:bold">${item.part}</div>
+                    <div class="desc-text">${item.desc}</div>
+                    
+                    <div style="font-size:0.65rem; color:${catColor}; font-weight:bold; margin-top:2px;">
+                        ${displayCategory}
+                    </div>
+                    <div style="font-size:0.6rem; color:#666; margin-top:4px;">(Klik untuk Copy Part)</div>
+                </td>
+                <td style="text-align:right">${item.qty}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    } else {
+        tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:20px; color:var(--text-muted)">Tidak ditemukan</td></tr>`;
+    }
+}
+					
+					function manageSearchItem(index) {
+					const item = fullInventory[index];
+					let options = {};
+					if (item.locations && item.locations.length > 0) {
+					options = {
+					title: 'Kelola Item',
+					html: `<b>${item.part}</b><br>${item.category}<br><br>Lokasi saat ini: <b>${item.locations.join(', ')}</b>`,
+					showDenyButton: true,
+					showCancelButton: true,
+					confirmButtonText: 'Tutup',
+					denyButtonText: '🗑️ Hapus Lokasi Box',
+					denyButtonColor: '#d33'
+					};
+					} else {
+					options = {
+					title: 'Info Item',
+					html: `<b>${item.part}</b><br>${item.category}<br><br>Status: Belum masuk box`,
+					confirmButtonText: 'Oke'
+					};
+					}
+					
+					Swal.fire(options).then((result) => {
+					if (result.isDenied) {
+					Swal.fire({
+					title: 'Hapus Lokasi?',
+					text: `Lokasi box akan dihapus dari data ${item.category} ini.`,
+					icon: 'warning',
+					showCancelButton: true,
+					confirmButtonText: 'Ya, Hapus!'
+					}).then((conf) => {
+					if (conf.isConfirmed) {
+					item.locations = [];
+					saveInventory();
+					rebuildSystemMap();
+					manualSearch();
+					Swal.fire('Terhapus', 'Lokasi berhasil dikosongkan.', 'success');
+					}
+					});
+					}
+					});
+					}
+					
+					function cancelPending() {
+					pendingPart = null;
+					updateUIState();
+					}
+					
+					function resetBox() {
+					currentBox = null;
+					localStorage.removeItem('wh_box');
+					localStorage.removeItem('wh_opname_state');
+					updateUIState();
+					opnameList = [];
 					renderOpnameTable();
 					}
 					
-					function renderOpnameTable() {
-					if (currentMode !== 'opname') return;
-					const tbody = document.getElementById('result-body');
-					const thead = document.getElementById('table-header');
-					thead.innerHTML = `<tr><th width="50%">Part Info</th><th width="20%" style="text-align:center">Fisik</th><th width="20%" style="text-align:center">Sys</th><th width="10%"></th></tr>`;
-					tbody.innerHTML = "";
-					
-					let filteredList = opnameList.filter(item => {
-					if (currentOpnameView === 'all') return true;
-					if (currentOpnameView === 'pending') return item.physicalQty === 0 && !item.isExtra && !item.isUnregistered;
-					if (currentOpnameView === 'diff') {
-					const isCountedButWrong = (item.physicalQty > 0 && item.physicalQty !== item.systemQty);
-					const isExtraItem = item.isExtra || item.isUnregistered;
-					return isCountedButWrong || isExtraItem;
+					async function clearDataWithSecurity() {
+					const isAuthorized = await verifySecurity('Reset Semua Data');
+					if (isAuthorized) {
+					scannedData = [];
+					await clearDB(); 
+					fullInventory = []; 
+					localStorage.removeItem('wh_data');
+					renderWorkTable();
+					updateDBStatus(0);
+					toggleModal(false);
+					Swal.fire("Terhapus", "Data History scan berhasil direset.", "success");
 					}
-					return true;
-					});
-					
-					if (filteredList.length === 0) {
-					let msg = "";
-					if (currentOpnameView === 'pending') msg = "Selesai! Semua barang sudah discan.";
-					else if (currentOpnameView === 'diff') msg = "Aman! Tidak ada selisih.";
-					else msg = "Box Kosong";
-					tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:40px; color:var(--text-muted); font-style:italic;">${msg}</td></tr>`;
-					updateTabCounters();
-					return;
 					}
 					
-					filteredList.forEach(item => {
-					let rowClass = '';
-					let qtyClass = '';
-					if (item.isUnregistered) {
-					rowClass = 'opname-unknown';
-					qtyClass = 'diff-text';
-					} else if (item.isExtra) {
-					rowClass = 'opname-diff';
-					qtyClass = 'diff-text';
-					} else if (item.physicalQty === 0) {
-					rowClass = '';
-					qtyClass = 'text-muted';
-					} else if (item.physicalQty === item.systemQty) {
-					rowClass = 'opname-match';
-					qtyClass = 'match-text';
+					function exportDatabase() {
+					if (!fullInventory.length) return Swal.fire("Info", "Database kosong", "info");
+					const exportData = fullInventory.map(item => ({
+					"PART NUMBER": item.part,
+					"DESKRIPSI": item.desc,
+					"QTY SYSTEM": item.qty,
+					"LOKASI BOX": item.locations ? item.locations.join(", ") : "",
+					"KATEGORI": item.category,
+					"TEKNISI": item.teknisi
+					}));
+					
+					const ws = XLSX.utils.json_to_sheet(exportData);
+					const wb = XLSX.utils.book_new();
+					XLSX.utils.book_append_sheet(wb, ws, "Database_Gudang");
+					const dateStr = new Date().toISOString().slice(0, 10);
+					XLSX.writeFile(wb, `Data_Gudang_${dateStr}.xlsx`);
+					toggleModal(false);
+					}
+					
+					function updateUIState() {
+					const s = document.getElementById('scan-status');
+					const r = document.getElementById('reader');
+					const pendingUi = document.getElementById('pending-ui');
+					const overlay = document.getElementById('scan-overlay');
+					const boxEl = document.getElementById('current-box-id');
+					const btnManual = document.querySelector('.btn-manual-scan');
+					
+					if (boxEl) boxEl.innerText = currentBox ? currentBox : "-";
+					
+					if (currentMode === 'opname') {
+					if (btnManual) btnManual.style.display = 'none';
 					} else {
-					rowClass = 'opname-diff';
-					qtyClass = 'diff-text';
+					if (btnManual) btnManual.style.display = 'flex';
 					}
 					
-					let badges = "";
-					if (item.isUnregistered) badges += `<span class="badge-new">NEW DB</span> `;
-					if (item.isExtra) badges += `<span class="badge-alert">SALAH LOKASI</span> `;
+					if (currentMode === 'store') {
+					if (pendingPart) {
+					s.innerText = "SCAN BOX SEKARANG!";
+					s.style.color = "var(--pending)";
+					r.style.borderColor = "var(--pending)";
+					pendingUi.classList.add('active');
+					overlay.classList.add('active');
+					document.getElementById('pending-part-display').innerText = pendingPart;
+					document.getElementById('overlay-part').innerText = pendingPart;
+					const item = systemDataMap[pendingPart];
+					const locContainer = document.getElementById('existing-locs');
+					if (item && item.locations && item.locations.length > 0) {
+					locContainer.innerHTML = item.locations.map(l => `<span class="loc-tag"><i class="fas fa-map-marker-alt"></i> ${l}</span>`).join('');
+					} else {
+					locContainer.innerHTML = `<span style="color:var(--text-muted); font-size:0.8rem;">Belum ada lokasi</span>`;
+					}
+					} else {
+					s.innerText = "Scan Barang (Part)";
+					s.style.color = "var(--accent-box)";
+					r.style.borderColor = "var(--accent-box)";
+					pendingUi.classList.remove('active');
+					overlay.classList.remove('active');
+					}
+					} else if (currentMode === 'opname') {
+					pendingUi.classList.remove('active');
+					overlay.classList.remove('active');
+					if (opnameCategoryMode === 'GUDANG') {
+					s.innerText = currentBox ? "Siap Opname Box" : "Scan BOX Dulu";
+					} else {
+					s.innerText = currentTeknisi ? "Siap Opname Teknisi" : "Pilih Teknisi Dulu";
+					}
+					r.style.borderColor = "var(--accent-part)";
+					} else {
+					s.innerText = "Mode Cari";
+					r.style.borderColor = "var(--accent-search)";
+					pendingUi.classList.remove('active');
+					overlay.classList.remove('active');
+					}
+					const secBadge = document.getElementById('security-alert');
+					if (fullInventory.length === 0 && secBadge) secBadge.style.display = 'block';
+					else if (secBadge) secBadge.style.display = 'none';
+					}
 					
-					const tr = document.createElement('tr');
-					tr.className = `opname-row ${rowClass}`;
-					tr.id = `opname-row-${item.part}`;
+					function saveOpnameState() {
+					const state = {
+					box: currentBox,
+					list: opnameList
+					};
+					localStorage.setItem('wh_opname_state', JSON.stringify(state));
+					}
 					
-					attachLongPress(tr, () => {
-					Swal.fire({
-					title: 'Edit Jumlah',
-					text: item.part,
-					input: 'number',
-					inputValue: item.physicalQty,
-					showCancelButton: true
-					}).then(r => {
-					if (r.isConfirmed) updateOpnameCount(item.part, parseInt(r.value) - item.physicalQty);
+					function scrollToPart(part) {
+					setTimeout(() => {
+					const row = document.getElementById(`opname-row-${part}`);
+					if (row) {
+					row.scrollIntoView({
+					behavior: 'smooth',
+					block: 'center'
 					});
+					row.classList.add('highlight-flash');
+					setTimeout(() => row.classList.remove('highlight-flash'), 2000);
+					}
+					}, 100);
+					}
+					
+					function initOpnameList(box) {
+					opnameList = [];
+					if (opnameCategoryMode === 'GUDANG') {
+					fullInventory.forEach(item => {
+					if (item.locations && item.locations.includes(box)) {
+					if (item.category !== 'SPAREPART TEKNISI') {
+					opnameList.push(createOpnameItem(item));
+					}
+					}
 					});
-					
-					tr.innerHTML = `
-					<td>
-						<div style="font-weight:bold; font-size:0.95rem;">${item.part}</div>
-						<div class="desc-text">${item.desc}</div>
-						<div style="margin-top:4px;">${badges}</div>
-					</td>
-					<td style="text-align:center; font-size:1.1rem; font-weight:bold" class="${qtyClass}">${item.physicalQty}</td>
-					<td style="text-align:center; font-size:0.9rem; opacity:0.7">${item.systemQty}</td>
-					<td style="text-align:center">
-						${item.physicalQty === item.systemQty && item.physicalQty > 0 ? '<i class="fas fa-check-circle" style="color:var(--accent-part)"></i>' : ''}
-						${(item.physicalQty !== item.systemQty && item.physicalQty > 0) || item.isExtra ? '<i class="fas fa-exclamation-circle" style="color:var(--danger)"></i>' : ''}
-					</td>
-					`;
-					tbody.appendChild(tr);
+					if (box) {
+					const totalItem = opnameList.length;
+					const badge = document.getElementById('box-part-count');
+					if (badge) badge.innerText = `${totalItem} Items`;
+					}
+					} else {
+					fullInventory.forEach(item => {
+					if (item.category === 'SPAREPART TEKNISI' && item.teknisi === currentTeknisi) {
+					opnameList.push(createOpnameItem(item));
+					}
 					});
-					
-					updateTabCounters();
+					}
+					saveOpnameState();
+					renderOpnameTable();
 					}
 					
-					function updateTabCounters() {
-					const pendingCount = opnameList.filter(i => i.physicalQty === 0 && !i.isExtra && !i.isUnregistered).length;
-					const diffCount = opnameList.filter(i => (i.physicalQty > 0 && i.physicalQty !== i.systemQty) || i.isExtra || i.isUnregistered).length;
-					document.getElementById('seg-pending').innerText = `Belum (${pendingCount})`;
-					document.getElementById('seg-diff').innerText = `Selisih (${diffCount})`;
+					function createOpnameItem(item) {
+					return {
+					part: item.part,
+					desc: item.desc,
+					systemQty: item.qty,
+					physicalQty: 0,
+					isExtra: false,
+					isUnregistered: false
+					};
 					}
 					
-					function attachLongPress(element, callback) {
-					element.addEventListener('mousedown', () => { pressTimer = setTimeout(callback, 2000); });
-					element.addEventListener('touchstart', () => { pressTimer = setTimeout(callback, 2000); });
-					const cancel = () => clearTimeout(pressTimer);
-					element.addEventListener('mouseup', cancel);
-					element.addEventListener('mouseleave', cancel);
-					element.addEventListener('touchend', cancel);
+					function updateOpnameCount(part, delta) {
+					const idx = opnameList.findIndex(i => i.part === part);
+					if (idx >= 0) {
+					opnameList[idx].physicalQty += delta;
+					if (opnameList[idx].physicalQty < 0) opnameList[idx].physicalQty = 0;
+					saveOpnameState();
+					renderOpnameTable();
+					scrollToPart(part);
+					}
 					}
 					
-					init();
-				</script>
-	</body>
-</html>
+					function setOpnameFilter(view) {
+					currentOpnameView = view;
+					document.querySelectorAll('.segment-btn').forEach(b => b.classList.remove('active'));
+						document.getElementById(`seg-${view}`).classList.add('active');
+						renderOpnameTable();
+						}
+						
+						function renderOpnameTable() {
+						if (currentMode !== 'opname') return;
+						const tbody = document.getElementById('result-body');
+						const thead = document.getElementById('table-header');
+						thead.innerHTML = `<tr><th width="50%">Part Info</th><th width="20%" style="text-align:center">Fisik</th><th width="20%" style="text-align:center">Sys</th><th width="10%"></th></tr>`;
+						tbody.innerHTML = "";
+						
+						let filteredList = opnameList.filter(item => {
+						if (currentOpnameView === 'all') return true;
+						if (currentOpnameView === 'pending') return item.physicalQty === 0 && !item.isExtra && !item.isUnregistered;
+						if (currentOpnameView === 'diff') {
+						const isCountedButWrong = (item.physicalQty > 0 && item.physicalQty !== item.systemQty);
+						const isExtraItem = item.isExtra || item.isUnregistered;
+						return isCountedButWrong || isExtraItem;
+						}
+						return true;
+						});
+						
+						if (filteredList.length === 0) {
+						let msg = "";
+						if (currentOpnameView === 'pending') msg = "Selesai! Semua barang sudah discan.";
+						else if (currentOpnameView === 'diff') msg = "Aman! Tidak ada selisih.";
+						else msg = "Box Kosong";
+						tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:40px; color:var(--text-muted); font-style:italic;">${msg}</td></tr>`;
+						updateTabCounters();
+						return;
+						}
+						
+						filteredList.forEach(item => {
+						let rowClass = '';
+						let qtyClass = '';
+						if (item.isUnregistered) {
+						rowClass = 'opname-unknown';
+						qtyClass = 'diff-text';
+						} else if (item.isExtra) {
+						rowClass = 'opname-diff';
+						qtyClass = 'diff-text';
+						} else if (item.physicalQty === 0) {
+						rowClass = '';
+						qtyClass = 'text-muted';
+						} else if (item.physicalQty === item.systemQty) {
+						rowClass = 'opname-match';
+						qtyClass = 'match-text';
+						} else {
+						rowClass = 'opname-diff';
+						qtyClass = 'diff-text';
+						}
+						
+						let badges = "";
+						if (item.isUnregistered) badges += `<span class="badge-new">NEW DB</span> `;
+						if (item.isExtra) badges += `<span class="badge-alert">SALAH LOKASI</span> `;
+						
+						const tr = document.createElement('tr');
+						tr.className = `opname-row ${rowClass}`;
+						tr.id = `opname-row-${item.part}`;
+						
+						attachLongPress(tr, () => {
+						Swal.fire({
+						title: 'Edit Jumlah',
+						text: item.part,
+						input: 'number',
+						inputValue: item.physicalQty,
+						showCancelButton: true
+						}).then(r => {
+						if (r.isConfirmed) updateOpnameCount(item.part, parseInt(r.value) - item.physicalQty);
+						});
+						});
+						
+						tr.innerHTML = `
+						<td>
+							<div style="font-weight:bold; font-size:0.95rem;">${item.part}</div>
+							<div class="desc-text">${item.desc}</div>
+							<div style="margin-top:4px;">${badges}</div>
+						</td>
+						<td style="text-align:center; font-size:1.1rem; font-weight:bold" class="${qtyClass}">${item.physicalQty}</td>
+						<td style="text-align:center; font-size:0.9rem; opacity:0.7">${item.systemQty}</td>
+						<td style="text-align:center">
+							${item.physicalQty === item.systemQty && item.physicalQty > 0 ? '<i class="fas fa-check-circle" style="color:var(--accent-part)"></i>' : ''}
+							${(item.physicalQty !== item.systemQty && item.physicalQty > 0) || item.isExtra ? '<i class="fas fa-exclamation-circle" style="color:var(--danger)"></i>' : ''}
+						</td>
+						`;
+						tbody.appendChild(tr);
+						});
+						
+						updateTabCounters();
+						}
+						
+						function updateTabCounters() {
+						const pendingCount = opnameList.filter(i => i.physicalQty === 0 && !i.isExtra && !i.isUnregistered).length;
+						const diffCount = opnameList.filter(i => (i.physicalQty > 0 && i.physicalQty !== i.systemQty) || i.isExtra || i.isUnregistered).length;
+						document.getElementById('seg-pending').innerText = `Belum (${pendingCount})`;
+						document.getElementById('seg-diff').innerText = `Selisih (${diffCount})`;
+						}
+						
+						function attachLongPress(element, callback) {
+						element.addEventListener('mousedown', () => { pressTimer = setTimeout(callback, 2000); });
+						element.addEventListener('touchstart', () => { pressTimer = setTimeout(callback, 2000); });
+						const cancel = () => clearTimeout(pressTimer);
+						element.addEventListener('mouseup', cancel);
+						element.addEventListener('mouseleave', cancel);
+						element.addEventListener('touchend', cancel);
+						}
+						
+						init();
+					</script>
+		</body>
+	</html>	
